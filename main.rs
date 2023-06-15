@@ -2,6 +2,7 @@
 use std::fs::File;
 use std::io::Read;
 use rand::random;
+use std::io;
 
 
 const DISPLAY_WIDTH:  usize = 64;
@@ -19,6 +20,8 @@ fn main() {
     let mut ir: u16 = 0; //index register
     let mut stack: Vec<u16> = Vec::new();
     let mut g_register: [u8; 16] = [0; 16];
+    let mut timer_delay: u8 = 0;
+    let mut timer_sound: u8 = 0;
 
 
 
@@ -57,6 +60,8 @@ fn main() {
             [  0xB,    a,    b,    c] => jump_v0_offset(&mut pc, &g_register, a, b, c),
             [  0xC, regx,    b,    c] => set_register_random(&mut g_register, regx, b, c),
             [  0xD, regx, regy,    n] => draw_sprite(&mut display, ir, &mut g_register, &mut memory, regx, regy, n),
+            [  0xF, regx,    b,    c] => special_register_operation(&mut g_register, &mut memory, &mut timer_delay, &mut timer_sound, &mut ir, regx, b, c),
+
 
 
 
@@ -68,13 +73,50 @@ fn main() {
 
         }
 
-        print_display(&display);
+        print_display(&mut display);
+
     }
 
     //
     //
     //
     //
+}
+
+fn special_register_operation (g_register: &mut [u8], memory: &mut [u8], timer_delay: &mut u8, timer_sound: &mut u8, ir: &mut u16, regx: u8, b: u8, c: u8) {
+    let x = regx as usize;
+    match (b, c) {
+
+        //TIMER INTO REG
+        (0,   7) => g_register[x] = *timer_delay,
+        //TODO: KEYPRESS TO REG
+        (0, 0xA) => (),
+        //REG INTO DELAY
+        (1,   5) => *timer_delay = g_register[x],
+        //REG INTO SOUND
+        (1,   8) => *timer_sound = g_register[x],
+        //IR = IR + REG
+        (1, 0xE) => *ir = *ir + g_register[x] as u16,
+        //TODO: IMPLEMENT LOAD SPRITE ADDR TO IR
+        (2,   9) => (),
+        //BINARY CODED DECIMAL
+        (3,   3) => {
+            let digits = [g_register[x] / 100, g_register[x] /10 % 10, g_register[x] % 10];
+            for i in 0..3 { memory[*ir as usize + i as usize] = digits[i] }
+        }
+        //FILL REG INTO MEM
+        (5,   5) => {
+            for i in 0..(regx + 1) { memory[(*ir + i as u16) as usize] = g_register[i as usize] }
+            *ir = *ir + 1 + regx as u16;   
+        },
+        //FILL MEM INTO REG
+        (6,   5) => { 
+            for i in 0..(regx + 1) { g_register[i as usize] = memory[(*ir + i as u16) as usize] }
+            *ir = *ir + 1 + regx as u16;
+        }
+
+            (_,_) => ()
+    }
 }
 
 fn set_register_random (g_register: &mut [u8; 16], regx: u8, b: u8, c: u8) {
@@ -118,32 +160,41 @@ fn register_operation (g_register: &mut [u8], regx: u8, regy: u8, op: u8) {
     let x = regx as usize;
     let y = regy as usize;
     match op {
+        //LD
         0x0 => { g_register[x] = g_register[y] },
+        //AND (all are bitwise)
         0x1 => { g_register[x] = g_register[x] & g_register[y] },
+        //OR
         0x2 => { g_register[x] = g_register[x] | g_register[y] },
+        //XOR
         0x3 => { g_register[x] = g_register[x] ^ g_register[y] },
+        //ADD
         0x4 => {
             let result: u16 = g_register[x] as u16 + g_register[y] as u16;
             g_register[x] = result as u8;
             if result > 255 { g_register[15] = 1 } else { g_register[15] = 0 }
             
         }
+        //SUB
         0x5 => {
             let result: u16 = g_register[x] as u16 - g_register[y] as u16;
             g_register[x] = result as u8;
             if g_register[x] > g_register[y] { g_register[15] = 1 } else { g_register[15] = 0 }
             
         }
+        //SHR
         0x6 => {
             g_register[15] = g_register[y] & 0x1;
             g_register[x] = g_register[y] >> 1;
         }
+        //SUBN
         0x7 => {
             let result: u16 = g_register[y] as u16 - g_register[x] as u16;
             g_register[x] = result as u8;
             if g_register[x] > g_register[y] { g_register[15] = 1 } else { g_register[15] = 0 }
             
         }
+        //SHL
         0xE => {
             g_register[15] = g_register[y] & 0x80;
             g_register[x] = g_register[y] << 1;
@@ -253,7 +304,7 @@ fn read_program_into_memory(mem: &mut [u8]) {
     let mut index = PROGRAM_OFFSET;
     const BUF_SIZE: usize = 64;
 
-    let mut f = File::open("IBM Logo.ch8").unwrap();
+    let mut f = File::open("octojam1title.ch8").unwrap();
     let mut buffer: [u8; BUF_SIZE] = [0; BUF_SIZE];
 
     while index < MEMORY_SIZE {

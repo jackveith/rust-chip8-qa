@@ -1,0 +1,9 @@
+Chip8 instruction reference
+https://github.com/mattmikolay/chip-8/wiki/CHIP%E2%80%908-Instruction-Set
+
+Chip8 instruction reference (detailed)
+http://devernay.free.fr/hacks/chip8/C8TECH10.HTM
+
+blog detailing chip8 spec
+https://tobiasvl.github.io/blog/write-a-chip-8-emulator
+

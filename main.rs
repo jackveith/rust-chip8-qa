@@ -1,19 +1,44 @@
 //chip emulator
 use std::fs::File;
 use std::io::Read;
-use rand::random;
+use rand::prelude::random;
 use std::io;
-use tokio::time::{ sleep, Duration };
+use std::io::prelude::*;
+use std::time::Duration;
+use std::{ thread, time };
+use std::collections::HashSet;
+
+use sdl2;
+use sdl2::keyboard::Scancode;   
+use sdl2::pixels::Color;
+use sdl2::render::Canvas;
+use sdl2::video::Window;
+
+
+
+
 
 const DISPLAY_WIDTH:  usize = 64;
 const DISPLAY_HEIGHT: usize = 32;
+const PIXEL_SIZE: usize = 4;
 const MEMORY_SIZE: usize = 4096;
 const PROGRAM_OFFSET: usize = 512;
 const FONT_OFFSET: usize = 0x50;
 const FONT_SIZE: usize = 80;
+const TIMER_CLOCK_FREQUENCY: Duration = Duration::from_micros(16666);
+
+const SCANCODES: [Scancode; 16] = [
+    Scancode::Num1, Scancode::Num2, Scancode::Num3, Scancode::Num4,
+    Scancode::Q,    Scancode::W,    Scancode::E,    Scancode::R,
+    Scancode::A,    Scancode::S,    Scancode::D,    Scancode::F,
+    Scancode::Z,    Scancode::X,    Scancode::C,    Scancode::V,
+
+];
+
 
 fn main() {
 
+    //chip8 system 
     let mut memory:  [u8; MEMORY_SIZE] = [0; MEMORY_SIZE];
     let mut display: [[u8; DISPLAY_WIDTH]; DISPLAY_HEIGHT] = [[0; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
     let mut pc: usize = PROGRAM_OFFSET; //program counter
@@ -22,7 +47,25 @@ fn main() {
     let mut g_register: [u8; 16] = [0; 16];
     let mut timer_delay: u8 = 0;
     let mut timer_sound: u8 = 0;
+    let mut timer_last_update: time::Instant = time::Instant::now();
+    let mut keystate: [u8; 16] = [0; 16];
 
+    let sdl_context = sdl2::init().unwrap();
+    let sdl_video_subsystem = sdl_context.video().unwrap();
+    let window = sdl_video_subsystem.window("chip8", DISPLAY_WIDTH * PIXEL_SIZE, DISPLAY_HEIGHT * PIXEL_SIZE)
+        .position_centered()
+        .build()
+        .unwrap();
+    let mut canvas = window.into_canvas()
+        .build()
+        .unwrap();
+    canvas.present();
+
+
+
+
+
+    let mut event_pump = sdl_context.event_pump().unwrap();
 
 
     read_program_into_memory(&mut memory); 
@@ -58,30 +101,39 @@ fn main() {
             [  0xB,    a,    b,    c] => jump_v0_offset(&mut pc, &g_register, a, b, c),
             [  0xC, regx,    b,    c] => set_register_random(&mut g_register, regx, b, c),
             [  0xD, regx, regy,    n] => draw_sprite(&mut display, ir, &mut g_register, &mut memory, regx, regy, n),
+            [  0xE, regx,    9,  0xE] => skip_instruction_key_pressed(&mut pc, &event_pump, &g_register, regx),
+            [  0xE, regx,  0xA,    1] => skip_instruction_key_not_pressed(&mut pc, &event_pump, &g_register, regx),
             [  0xF, regx,    b,    c] => special_register_operation(&mut g_register, &mut memory, &mut timer_delay, &mut timer_sound, &mut ir, regx, b, c),
 
-
-
-
-
-                
 
             [0,0,0,0] => (),
                 [_, _, _, _] => println!["failure to parse"],
 
         }
-
         print_display(&mut display);
+        pressed_scancode_set(&event_pump);
+
+
+        /*
         for a in current_instruction_nibbles {
+
             print!("{}, ", a);
         }   println!();
         for a in 0..16 {
             print!("{}, ", g_register[a]);
         }   println!();
-        //sleep(Duration::from_millis(5000));
+        */
+        //thread::sleep(time::Duration::from_millis(300));
+
+
+        if time::Instant::now() > timer_last_update + TIMER_CLOCK_FREQUENCY  {
+            timer_last_update = time::Instant::now();
+            decrement_timers(&mut timer_sound, &mut timer_delay);
+
+        }   
 
         its += 1;
-        if its >= 60 { break }
+        //if its >= 60 { break }
 
     }
 
@@ -90,6 +142,49 @@ fn main() {
     //
     //
 }
+
+fn update_canvas(canvas: &mut Canvas<Window>) {
+
+    
+    for row in 0..DISPLAY_HEIGHT {
+        for i in 0..DISPLAY_WIDTH {
+            if display[row][i] == 1 {  } 
+            else                    { printout.push(' ')}
+        }
+    }
+}
+
+
+
+fn pressed_scancode_set(ep: &sdl2::EventPump) -> HashSet<Scancode> {
+    
+    let c: HashSet<Scancode> = ep.keyboard_state().pressed_scancodes().collect();
+    for s in c {
+        print!("{:?}, ", s);
+    }
+
+    ep.keyboard_state().pressed_scancodes().collect()
+
+}
+
+fn decrement_timers(timer_sound: &mut u8, timer_delay: &mut u8) {
+    if *timer_sound > 0 { *timer_sound -= 1 }
+    if *timer_delay > 0 { *timer_delay -= 1 }
+}
+
+//SKIPPING ON KEY EVENTS
+
+fn skip_instruction_key_pressed(pc: &mut usize, ep: &sdl2::EventPump, g_register: &[u8], regx: u8) {
+    println!("{:?}", &SCANCODES[g_register[regx as usize] as usize]);
+    if pressed_scancode_set(ep).contains(&SCANCODES[g_register[regx as usize] as usize]) { *pc += 2 }
+}
+
+fn skip_instruction_key_not_pressed(pc: &mut usize, ep: &sdl2::EventPump, g_register: &[u8], regx: u8) {
+    println!("{:?}", &SCANCODES[g_register[regx as usize] as usize]);
+    if pressed_scancode_set(ep).contains(&SCANCODES[g_register[regx as usize] as usize]) { *pc += 2 }
+}
+
+
 
 
 //JUMPING AND SUBROUTINES
@@ -332,17 +427,16 @@ fn load_font_into_memory (mem: &mut [u8]) {
         }
 
         if read_count <  BUF_SIZE { break; }
-        
     } 
-
-}
+} 
 
 fn read_program_into_memory(mem: &mut [u8]) {
+
 
     let mut index = PROGRAM_OFFSET;
     const BUF_SIZE: usize = 64;
 
-    let mut f = File::open("octojam6title.ch8").unwrap();
+    let mut f = File::open("invaders.c8").unwrap();
     let mut buffer: [u8; BUF_SIZE] = [0; BUF_SIZE];
 
     while index < MEMORY_SIZE {
